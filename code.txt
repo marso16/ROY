@@ -1,201 +1,303 @@
-# Importing Required Libraries
+#%%
 import pandas as pd
-import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
 import numpy as np
-import pickle
-from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV, KFold
-from sklearn.linear_model import LogisticRegression, Ridge
-from sklearn.metrics import (
-    mean_squared_error, accuracy_score,
-    ConfusionMatrixDisplay, precision_score, recall_score, f1_score, roc_auc_score
-)
-from sklearn.inspection import permutation_importance
-
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.neural_network import MLPClassifier
+import matplotlib.pyplot as plt
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import accuracy_score, classification_report, ConfusionMatrixDisplay, confusion_matrix, precision_score, recall_score, f1_score
+from sklearn.model_selection import train_test_split
+from sklearn import tree
 warnings.filterwarnings('ignore')
-
-# Load and Clean the Data
+#%%
+# Load datasets
 players_df = pd.read_csv('./datasets/players.csv')
-team_df = pd.read_csv('./datasets/team.csv')
+teams_df = pd.read_csv('./datasets/teams.csv')
 
-# Automatically handle 'Unnamed' columns
-players_df.rename(columns=lambda x: x if not x.startswith('Unnamed') else f'Col_{x.split(":")[-1]}', inplace=True)
-team_df.rename(columns=lambda x: x if not x.startswith('Unnamed') else f'Col_{x.split(":")[-1]}', inplace=True)
+# Preview the datasets
+print("Players Data Overview:")
+print(players_df.info())
+print(players_df.head(), "\n")
 
-# Remove columns with all missing values
-players_cleaned = players_df.dropna(axis=1, how='all')
-team_cleaned = team_df.dropna(axis=1, how='all')
+print("Teams Data Overview:")
+print(teams_df.info())
+print(teams_df.head(), "\n")
+#%%
+# Ensure uniqueness of teams in both datasets
+print("\nUnique teams in Players Dataset:", players_df['Team'].unique())
+print("Unique teams in Teams Dataset:", teams_df['Team'].unique())
 
-# Check and handle duplicates
-players_cleaned.drop_duplicates(inplace=True)
-team_cleaned.drop_duplicates(inplace=True)
+# Check for duplicates and drop them
+print("\nDuplicates in Players Dataset:", players_df.duplicated().sum())
+print("Duplicates in Teams Dataset:", teams_df.duplicated().sum())
+players_df = players_df.drop_duplicates()
+teams_df = teams_df.drop_duplicates()
+#%%
+# # Missing values
+# print("\nMissing Values in Players Dataset:")
+# print(players_df.isnull().sum())
+# print("\nMissing Values in Teams Dataset:")
+# print(teams_df.isnull().sum())
+#
+# # Fill missing values (example: fill numeric with median, categorical with mode)
+# players_df.fillna(players_df.median(numeric_only=True), inplace=True)
+# teams_df.fillna(teams_df.median(numeric_only=True), inplace=True)
+# players_df.fillna(players_df.mode().iloc[0], inplace=True)
+# teams_df.fillna(teams_df.mode().iloc[0], inplace=True)
+#%%
+# Merge datasets on the common column 'Team'
+combined_df = pd.merge(players_df, teams_df, on='Team', how='inner')
+print("\nCombined Data Overview:")
+print(combined_df.info())
+print(combined_df.head())
 
 # Descriptive Statistics
-print("Players Dataset Statistics:")
-print(players_cleaned.describe())
+print("\nDescriptive Statistics for Players Data:")
+print(players_df.describe())
 
-print("\nTeams Dataset Statistics:")
-print(team_cleaned.describe())
+print("\nDescriptive Statistics for Teams Data:")
+print(teams_df.describe())
+#%%
+# Data Visualization
+sns.set_theme(style="whitegrid")
 
-# Visualization: Points vs. Minutes Played (From players_cleaned)
+# Histogram of player points
 plt.figure(figsize=(10, 6))
-sns.scatterplot(data=players_cleaned, x='Min', y='PTS', hue='Team', palette='tab10')
-plt.title('Player Points vs. Minutes Played')
-plt.xlabel('Minutes Played')
-plt.ylabel('Points')
-plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+sns.histplot(players_df['PTS'], bins=20, kde=True, color='blue')
+plt.title('Distribution of Player Points')
+plt.xlabel('Points')
+plt.ylabel('Freq')
+plt.show()
+#%%
+teams_df.head()
+# Team vs Player points comparison
+team_points = teams_df[['Team', 'PTS']].set_index('Team')
+player_avg_points = players_df.groupby('Team')['PTS'].mean()
+
+plt.figure(figsize=(14, 7))
+team_points['Average Player Points'] = player_avg_points
+team_points.plot(kind='bar', figsize=(14, 7), title='Team vs Player Points Comparison')
+plt.ylabel('pts')
+plt.show()
+#%%
+# # Correlation heatmap
+# plt.figure(figsize=(10, 8))
+# corr = combined_df.corr()
+# sns.heatmap(corr, annot=True, fmt=".2f", cmap='coolwarm', square=True)
+# plt.title('Correlation Heatmap')
+# plt.show()
+#%%
+# Outlier detection using IQR (detects points that are far or different from other points in the dataset)
+def detect_outliers(df, column):
+    Q1 = df[column].quantile(0.25)
+    Q3 = df[column].quantile(0.75)
+    IQR = Q3 - Q1
+    lower_bound = Q1 - 1.5 * IQR
+    upper_bound = Q3 + 1.5 * IQR
+    return df[(df[column] < lower_bound) | (df[column] > upper_bound)]
+
+outliers = detect_outliers(players_df, 'PTS')
+print("\nOutliers in Player Points:")
+print(outliers)
+#%%
+# Save cleaned and processed data
+players_df.to_csv('./datasets/cleaned_players.csv', index=False)
+teams_df.to_csv('./datasets/cleaned_teams.csv', index=False)
+
+print("\nEDA completed. Cleaned datasets saved!")
+#%%
+# Identify categorical columns
+categorical_cols_players = players_df.select_dtypes(include=['object']).columns
+categorical_cols_teams = teams_df.select_dtypes(include=['object']).columns
+
+print("\nCategorical Columns in Players Dataset:", categorical_cols_players.tolist())
+print("Categorical Columns in Teams Dataset:", categorical_cols_teams.tolist())
+
+# # Handle missing values in categorical columns (fill with mode)
+# for col in categorical_cols_players:
+#     players_df[col].fillna(players_df[col].mode()[0], inplace=True)
+#
+# for col in categorical_cols_teams:
+#     teams_df[col].fillna(teams_df[col].mode()[0], inplace=True)
+#%%
+# Feature engineering: Create new features from categorical data (here convert team names to team codes)
+team_mapping = {name: idx for idx, name in enumerate(players_df['Team'].unique())}
+players_df['team_code'] = players_df['Team'].map(team_mapping)
+teams_df['team_code'] = teams_df['Team'].map(team_mapping)
+#%%
+# Encoding: Convert categorical variables into numerical formats using one-hot encoding technique
+players_encoded = pd.get_dummies(players_df, columns=['Name', 'Team'], prefix='pos', drop_first=True)
+teams_encoded = pd.get_dummies(teams_df, columns=['Team'], prefix='conf', drop_first=True)
+#%%
+# Scaling: Apply standardization for consistency (Scale player stats (excluding categorical/team_code))
+numerical_cols_players = players_df.select_dtypes(include=['float64', 'int64']).columns
+scaler_players = StandardScaler()
+players_df[numerical_cols_players] = scaler_players.fit_transform(players_df[numerical_cols_players])
+numerical_cols_teams = teams_df.select_dtypes(include=['float64', 'int64']).columns
+scaler_teams = StandardScaler()
+teams_df[numerical_cols_teams] = scaler_teams.fit_transform(teams_df[numerical_cols_teams])
+#%%
+# Final combined DataFrame for preprocessing
+final_combined_df = pd.merge(players_encoded, teams_encoded, on='team_code', how='inner')
+print("\nPreprocessed Combined DataFrame Overview:")
+print(final_combined_df.info())
+print(final_combined_df.head())
+final_combined_df.to_csv('./datasets/data.csv', index=False)
+#%%
+preprocessing_steps = """
+### Data Preprocessing Documentation
+
+#### 1. Raw Data Cleaning:
+- Dropped duplicate rows in both datasets.
+- Standardized column names to lowercase and stripped extra spaces.
+- Filled missing values:
+  - **Numeric columns**: Imputed using the median.
+  - **Categorical columns**: Imputed using the mode.
+
+#### 2. Handling Categorical Variables:
+- Identified categorical columns: 'team', 'position', and 'conference'.
+- Applied the following techniques:
+  - **Imputation**: Filled missing values with the most frequent value.
+  - **Feature Engineering**: Created a 'team_code' column by mapping team names to unique numeric codes.
+  - **Encoding**: One-hot encoded the 'position' (players) and 'conference' (teams) columns.
+
+#### 3. Scaling:
+- Standardized all numerical features using `StandardScaler` to ensure uniformity.
+
+#### 4. Data Merging:
+- Merged the players and teams datasets on the newly created 'team_code' column for seamless integration.
+
+#### 5. Final Dataset:
+- Saved the cleaned and processed datasets as 'cleaned_players.csv', 'cleaned_teams.csv', and 'final_combined.csv' for future use.
+"""
+
+# Save the preprocessing steps to a text file
+with open("preprocessing_documentation.txt", "w") as file:
+    file.write(preprocessing_steps)
+
+print("\nPreprocessing steps documented and saved to 'preprocessing_documentation.txt'.")
+#%%
+# Select features and target for regression (here predicting 'points' according to other features)
+X = players_df[['AST', 'REB', 'STL', 'BLK', 'TOV', 'Min', 'Age', 'GP', 'W', 'L', 'FG%']]
+y = players_df['PTS']
+
+# Split data into training and test sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+# Initialize Linear Regression model
+lin_reg = LinearRegression()
+
+# Fit model to training data
+lin_reg.fit(X_train, y_train)
+
+# Predict on the test data
+y_pred = lin_reg.predict(X_test)
+
+# Evaluate the model
+mse = mean_squared_error(y_test, y_pred)
+r2 = r2_score(y_test, y_pred)
+
+# Plot predicted vs actual points
+plt.figure(figsize=(8,6))
+plt.scatter(y_test, y_pred, color='blue')
+plt.plot([min(y_test), max(y_test)], [min(y_test), max(y_test)], color='red', linestyle='--')
+plt.title('Linear Regression: Predicted vs Actual Points')
+plt.xlabel('Actual Points')
+plt.ylabel('Predicted Points')
 plt.show()
 
-# Add Efficiency and Player Efficiency Rating (PER)
-players_cleaned['Efficiency'] = players_cleaned['PTS'] / players_cleaned['Min']
-players_cleaned['Efficiency'] = players_cleaned['Efficiency'].fillna(0)
+print(f"Mean Squared Error: {mse}")
+print(f"R-squared: {r2}")
+#%%
+# Create a binary classification target based on points (high vs low performance)
+median_points = players_df['PTS'].median()
+players_df['performance'] = (players_df['PTS'] >= median_points).astype(int)  # 1 for High, 0 for Low
 
-# PER calculation 
-players_cleaned['PER'] = (
-                                 players_cleaned['PTS'] + players_cleaned['REB'] +
-                                 players_cleaned['AST'] + players_cleaned['STL'] + players_cleaned['BLK']
-                         ) - players_cleaned['TOV']
+# Select features (excluding 'points' and 'performance')
+X_classify = players_df[['AST', 'REB', 'STL', 'BLK', 'TOV', 'Min', 'Age', 'GP', 'W', 'L', 'FG%']]
+y_classify = players_df['performance']
 
-# Feature Engineering: Team-Level Efficiency and Performance Classification
+# Split data into training and test sets
+X_train_class, X_test_class, y_train_class, y_test_class = train_test_split(X_classify, y_classify, test_size=0.2, random_state=42)
+# Initialize Decision Tree Classifier
+clf = DecisionTreeClassifier(random_state=42)
 
-# Assuming 'PTS', 'REB', 'AST', 'STL', 'BLK', and 'TOV' are available in team_cleaned
-# Calculate team-level efficiency based on available stats. If needed, you can aggregate per team.
+# Fit model to training data
+clf.fit(X_train_class, y_train_class)
 
-# Example: Calculate basic team efficiency by averaging player-level stats (here using placeholder column names)
-# Adjust these lines to match your dataset structure.
+# Predict on the test data
+y_pred_class = clf.predict(X_test_class)
 
-team_cleaned['Efficiency'] = (
-                                     team_cleaned['PTS'] + team_cleaned['REB'] + team_cleaned['AST'] +
-                                     team_cleaned['STL'] + team_cleaned['BLK'] - team_cleaned['TOV']
-                             ) / team_cleaned.shape[0]  # This assumes there are multiple rows for each team
+# Evaluate the classifier
+accuracy = accuracy_score(y_test_class, y_pred_class)
+print(f"Accuracy: {accuracy}")
+print("\nClassification Report:\n", classification_report(y_test_class, y_pred_class))
 
-# Classify teams based on their efficiency
-team_cleaned['Performance'] = pd.cut(
-    team_cleaned['Efficiency'],
-    bins=[-np.inf, 0.5, 1.0, np.inf],  # Example bins for classification
-    labels=['Bad', 'Average', 'Good']
-)
+# Visualize the decision tree
+plt.figure(figsize=(12,8))
+tree.plot_tree(clf, feature_names=X_classify.columns, class_names=["Low", "High"], filled=True, rounded=True)
+plt.title('Decision Tree Classifier for Player Performance')
+plt.show()
+#%%
+# Initialize ANN (MLP Classifier)
+ann_clf = MLPClassifier(hidden_layer_sizes=(100,), max_iter=500, random_state=42)
 
-# Visualization: Team Performance Categories (Violin Plot)
-plt.figure(figsize=(10, 6))
-sns.violinplot(data=team_cleaned, x='Performance', y='Efficiency', palette='muted')
-plt.title('Efficiency Distribution by Team Performance Category')
+# Train the ANN model
+ann_clf.fit(X_train_class, y_train_class)
+
+# Predict and evaluate
+y_pred_ann = ann_clf.predict(X_test_class)
+accuracy_ann = accuracy_score(y_test_class, y_pred_ann)
+
+print(f"ANN Accuracy: {accuracy_ann}")
+print("\nANN Classification Report:\n", classification_report(y_test_class, y_pred_ann))
+#%%
+# Get the confusion matrix for the classification model
+conf_matrix = confusion_matrix(y_test_class, y_pred_class)
+cm_display = ConfusionMatrixDisplay(confusion_matrix=conf_matrix, display_labels=["Low", "High"])
+
+# Plot confusion matrix
+cm_display.plot(cmap="Blues")
+plt.title("Confusion Matrix for Decision Tree / ANN Classifier")
 plt.show()
 
-# Model Training Data Preparation for Regression (from players_cleaned)
-X_reg = players_cleaned[['Min', 'REB', 'AST', 'STL', 'BLK', 'TOV']].fillna(0)
-y_reg = players_cleaned['Efficiency']
+# Display classification accuracy
+accuracy_class = accuracy_score(y_test_class, y_pred_class)
+print(f"Accuracy: {accuracy_class}")
+#%%
+# Predicted probabilities for each class
+y_pred_prob = ann_clf.predict_proba(X_test_class)
 
-X_class = X_reg
-y_class = players_cleaned['Performance']
-
-# Split data for regression and classification
-X_reg_train, X_reg_test, y_reg_train, y_reg_test = train_test_split(X_reg, y_reg, test_size=0.2, random_state=42)
-X_class_train, X_class_test, y_class_train, y_class_test = train_test_split(X_class, y_class, test_size=0.2,
-                                                                            random_state=42)
-# Regression: Ridge Model with Cross-Validation
-ridge = Ridge(alpha=1.0)
-ridge_cv = cross_val_score(ridge, X_reg, y_reg, cv=KFold(n_splits=5))
-ridge.fit(X_reg_train, y_reg_train)
-y_reg_pred = ridge.predict(X_reg_test)
-
-# Permutation Feature Importance for Regression
-perm_importance_reg = permutation_importance(ridge, X_reg_test, y_reg_test, n_repeats=10, random_state=42)
-importance_df = pd.DataFrame({
-    'Feature': X_reg.columns,
-    'Importance': perm_importance_reg.importances_mean
-}).sort_values(by='Importance', ascending=False)
-
-# Plot feature importances
-plt.figure(figsize=(10, 6))
-sns.barplot(x='Importance', y='Feature', data=importance_df)
-plt.title('Feature Importance (Permutation) - Regression Model')
+# Plot predicted probabilities for the 'High' class
+plt.figure(figsize=(8,6))
+plt.hist(y_pred_prob[:, 1], bins=10, color='purple', alpha=0.7, label='Predicted Probability for High Performance')
+plt.title('Predicted Probabilities for High Performance')
+plt.xlabel('Predicted Probability')
+plt.ylabel('Frequency')
+plt.legend()
 plt.show()
-
-# Determine Threshold and Drop Unimportant Features (Regression)
-importance_threshold = 0.01  # Example threshold for feature importance
-
-# Filter regression features
-important_features_reg = importance_df[importance_df['Importance'] > importance_threshold]['Feature'].tolist()
-X_reg_filtered = X_reg[important_features_reg]
-
-# Re-split data with filtered features
-X_reg_train, X_reg_test, y_reg_train, y_reg_test = train_test_split(X_reg_filtered, y_reg, test_size=0.2,
-                                                                    random_state=42)
-
-# Regression Evaluation
-mse = mean_squared_error(y_reg_test, y_reg_pred)
+#%%
+# Evaluate the regression model using MSE, RMSE, and R²
+mse = mean_squared_error(y_test, y_pred)
 rmse = np.sqrt(mse)
-print("Regression Model Evaluation:")
-print(f"Cross-Validation Score: {ridge_cv.mean():.4f}")
-print(f"Root Mean Squared Error (RMSE): {rmse:.4f}")
+r2 = r2_score(y_test, y_pred)
 
-# Save Ridge Model
-with open('./models/ridge_model.pkl', 'wb') as file:
-    pickle.dump(ridge, file)
+print(f"Mean Squared Error (MSE): {mse}")
+print(f"Root Mean Squared Error (RMSE): {rmse}")
+print(f"R-squared (R²): {r2}")
+# Evaluate the classification model
+accuracy = accuracy_score(y_test_class, y_pred_class)
+precision = precision_score(y_test_class, y_pred_class)
+recall = recall_score(y_test_class, y_pred_class)
+f1 = f1_score(y_test_class, y_pred_class)
 
-# Classification: Logistic Regression with Hyperparameter Tuning
-param_grid = {'C': [0.1, 1, 10, 100], 'solver': ['lbfgs', 'liblinear']}
-grid = GridSearchCV(LogisticRegression(max_iter=1000), param_grid, cv=KFold(n_splits=5), scoring='accuracy')
-grid.fit(X_class_train, y_class_train)
+print(f"Accuracy: {accuracy}")
+print(f"Precision: {precision}")
+print(f"Recall: {recall}")
+print(f"F1-Score: {f1}")
 
-classifier = grid.best_estimator_
-y_class_pred = classifier.predict(X_class_test)
-y_class_proba = classifier.predict_proba(X_class_test)
-
-# Permutation Feature Importance for Classification
-perm_importance_class = permutation_importance(classifier, X_class_test, y_class_test, n_repeats=10, random_state=42)
-class_importance_df = pd.DataFrame({
-    'Feature': X_class.columns,
-    'Importance': perm_importance_class.importances_mean
-}).sort_values(by='Importance', ascending=False)
-
-# Plot feature importances
-plt.figure(figsize=(10, 6))
-sns.barplot(x='Importance', y='Feature', data=class_importance_df)
-plt.title('Feature Importance (Permutation) - Classification Model')
-plt.show()
-
-# Determine Threshold and Drop Unimportant Features (Classification)
-important_features_class = class_importance_df[class_importance_df['Importance'] > importance_threshold][
-    'Feature'].tolist()
-X_class_filtered = X_class[important_features_class]
-
-# Re-split data with filtered features
-X_class_train, X_class_test, y_class_train, y_class_test = train_test_split(X_class_filtered, y_class, test_size=0.2,
-                                                                            random_state=42)
-
-# For one-hot encoded arrays
-if len(y_class_test.shape) > 1:
-    y_class_test = np.argmax(y_class_test, axis=1)
-
-if len(y_class_pred.shape) > 1:
-    y_class_pred = np.argmax(y_class_pred, axis=1)
-
-# Classification Evaluation
-accuracy = accuracy_score(y_class_test, y_class_pred)
-precision = precision_score(y_class_test, y_class_pred, average='weighted')
-recall = recall_score(y_class_test, y_class_pred, average='weighted')
-f1 = f1_score(y_class_test, y_class_pred, average='weighted')
-
-# For roc_auc, ensure y_class_test is in the correct format (either class labels or one-hot encoded)
-roc_auc = roc_auc_score(y_class_test, y_class_proba, multi_class='ovr')
-
-# Print the evaluation metrics
-print("\nClassification Model Evaluation:")
-print(f"Accuracy: {accuracy:.4f}")
-print(f"Precision: {precision:.4f}")
-print(f"Recall: {recall:.4f}")
-print(f"F1 Score: {f1:.4f}")
-print(f"ROC-AUC Score: {roc_auc:.4f}")
-
-# Save Logistic Model
-with open('./models/logistic_model.pkl', 'wb') as file:
-    pickle.dump(classifier, file)
-
-# Visualization: Violin Plot for Performance Categories (from team_cleaned)
-plt.figure(figsize=(10, 6))
-sns.violinplot(data=team_cleaned, x='Performance', y='Efficiency', palette='muted')
-plt.title('Efficiency Distribution by Team Performance Category')
-plt.show()
+# Detailed classification report
+print("\nClassification Report:\n", classification_report(y_test_class, y_pred_class))
